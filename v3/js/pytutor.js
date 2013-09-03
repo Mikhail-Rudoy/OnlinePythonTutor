@@ -135,7 +135,10 @@ function ExecutionVisualizer(domRootID, dat, params) {
   }
 
   this.curInstr = 0;
+  
+  
 
+  
   this.params = params;
   if (!this.params) {
     this.params = {}; // make it an empty object by default
@@ -252,8 +255,73 @@ function ExecutionVisualizer(domRootID, dat, params) {
   this.enableTransitions = false; // EXPERIMENTAL - enable transition effects
 
 
+	this.frame_tree = [0, 0];
+  this.frame_lookup = [this.curTrace[0].func_name];
+  cur_stack = [this.frame_tree];
+  this.frame_depth = 0;
+  for(var i = 0; i < this.curTrace.length; i++)
+  {
+  	if(this.curTrace[i].event == "return" || this.curTrace[i].event == "exception")
+    {
+    	if(cur_stack.length > this.frame_depth)
+    	{
+    		this.frame_depth = cur_stack.length;
+    	}
+      cur_stack[cur_stack.length - 1].push(i);
+      cur_stack.pop();
+    }
+    else if(this.curTrace[i].event == "instruction_limit_reached")
+    {
+ 		  while(cur_stack.length > 0)
+      {
+  	    if(cur_stack.length > this.frame_depth)
+  	    {
+   		    this.frame_depth = cur_stack.length;
+        }
+  	    cur_stack[cur_stack.length - 1].push(this.curTrace.length - 2);
+        cur_stack.pop();
+      }
+      break;
+    }
+    else
+    {
+    	count = this.curTrace[i].stack_to_render.length + 1;
+    	for(var j = 0; j < this.curTrace[i].stack_to_render.length; j++)
+      {
+      	if(this.curTrace[i].stack_to_render[j].is_zombie)
+      	{
+      		count = count - 1;
+      	}
+      }
+      if(cur_stack.length != count)
+      {
+      	outer: for(var j = 0; j < this.curTrace[i].stack_to_render.length; j++)
+        {
+      	  if(this.curTrace[i].stack_to_render[j].is_zombie)
+      	  {
+      	  	continue;
+      	  }
+      	  for(k = 0; k < cur_stack.length; k++)
+      	  {
+      	  	if(cur_stack[k][0] == this.curTrace[i].stack_to_render[j].frame_id)
+      	  	{
+      	  		continue outer;
+      	  	}
+      	  }
+          cur_stack[cur_stack.length-1].push([]);
+          cur_stack.push(cur_stack[cur_stack.length-1][cur_stack[cur_stack.length-1].length-1]);
+          cur_stack[cur_stack.length-1].push(this.curTrace[i].stack_to_render[j].frame_id);
+          cur_stack[cur_stack.length-1].push(i);
+          this.frame_lookup[this.curTrace[i].stack_to_render[j].frame_id] = this.curTrace[i].stack_to_render[j].func_name;
+        }
+      }
+    }
+  }
   this.hasRendered = false;
-
+  
+	this.graphs = [];
+  
+	
   this.render(); // go for it!
   
 }
@@ -339,7 +407,7 @@ ExecutionVisualizer.prototype.render = function() {
   else {
     this.domRoot.html(vizHeaderHTML + '<table border="0" class="visualizer"><tr><td class="vizLayoutTd" id="vizLayoutTdFirst">' +
                       codeDisplayHTML + '</td><td class="vizLayoutTd" id="vizLayoutTdSecond">' +
-                      codeVizHTML + '</td></tr></table>');
+                      codeVizHTML + '</td><td class="vizLayoutTd" id="vizLayoutTdThird"><div id="graph_div" style="border-left:1px solid black;overflow:auto;height:600px;min-width:250px;"></div></td></tr></table>');
   }
 
   if (this.showOnlyOutputs) {
@@ -566,6 +634,22 @@ ExecutionVisualizer.prototype.render = function() {
   if (this.params.jumpToEnd) {
     this.curInstr = this.curTrace.length - 1;
   }
+
+	DataList = [];
+  for(i = 0; i < this.curTrace.length; i++)
+  {
+  	if(this.curTrace[i].globals == undefined)
+  	{}
+  	else if(this.curTrace[i].globals["x"] != undefined)
+  	{
+  		DataList[i] = this.curTrace[i].globals["x"];
+  	}
+  	else
+ 		{
+  		DataList[i] = undefined;
+  	}
+  }
+	new Graph(document.getElementById("graph_div"), DataList, "x", this);
 
 
   this.precomputeCurTraceLayouts();
@@ -1204,6 +1288,11 @@ function htmlWithHighlight(inputStr, highlightInd, extent, highlightCssClass) {
 // smoothTransition is OPTIONAL!
 ExecutionVisualizer.prototype.updateOutput = function(smoothTransition) {
   assert(this.curTrace);
+  
+  for(i = 0; i < this.graphs.length; i++)
+  {
+  	this.graphs[i].redraw();
+  }
 
   var myViz = this; // to prevent confusion of 'this' inside of nested functions
 
@@ -2965,6 +3054,183 @@ ExecutionVisualizer.prototype.renderDataStructures = function() {
 
 ExecutionVisualizer.prototype.redrawConnectors = function() {
   this.jsPlumbInstance.repaintEverything();
+}
+
+// Graph
+function Graph(container, dataList, varName, myViz, openFrameList)
+{
+	this.myViz = myViz;
+	this.myViz.graphs.push(this);
+	this.root = container;
+	this.dataList = dataList;
+	this.heading = varName;
+	if(openFrameList == undefined)
+	{
+		this.openFrameList = Array.apply(null, new Array(myViz.frame_lookup.length)).map(function () {return true;});
+	}
+	else
+	{
+		this.openFrameList = openFrameList;
+	}
+	$(this.root).append("<table style='border:0px solid black;width:100%'></table>");
+	this.table = d3.select(this.root.children[this.root.children.length - 1]);
+	tbody = this.table.append("tbody");
+	tbody.append("tr").append("th").text(this.heading).attr("colspan", this.myViz.frame_depth + 3);
+	row = tbody.append("tr");
+	row.append("th").text("step\t");
+	row.append("th").attr("colspan", this.myViz.frame_depth + 1);
+	row.append("th").text("line\t");
+	row.append("th").text("value").style("width", "100%").attr("align", "left");
+	
+	this.tbody = this.table.append("tbody");
+	this.redraw();
+}
+
+getClosedLength = function(tree, openFrameList)
+{
+	if(openFrameList[tree[0]])
+	{
+		sum = 0;
+		for(var i = 2; i < tree.length - 1; i++)
+		{
+			sum = sum + getClosedLength(tree[i], openFrameList);
+		}
+		return sum;
+	}
+	else
+	{
+		return tree[tree.length - 1] - tree[1];
+	}
+}
+
+Graph.prototype.redraw = function()
+{
+
+	theGraph = this;
+	this.tbody.html("");
+	cur_stack = [this.myViz.frame_tree];
+	cur_indices = [1];
+	i = 0;
+	while(i < this.dataList.length)
+	{
+		top_item = cur_stack[cur_stack.length - 1];
+		top_index = cur_indices[cur_indices.length - 1];
+		if(top_index == top_item.length - 1)
+		{
+			row = this.tbody.append("tr");
+			row.append("td").text((i+1)).style("color", "grey");
+			row.append("td").attr("colspan", 1 + this.myViz.frame_depth - cur_stack.length);
+			row.append("td").text(this.myViz.curTrace[i].line);
+			row.append("td").text(String(this.dataList[i]));
+			if(i == top_item[top_item.length - 1])
+			{
+				cur_stack.pop();
+				cur_indices.pop();
+				cur_indices[cur_indices.length - 1] = cur_indices[cur_indices.length - 1] + 1;
+			}
+			i = i + 1;
+		}
+		else if(top_index == 1 || (top_index > 1 && top_item[top_index][1] == i))
+		{
+			if(top_index > 1)
+			{
+				cur_stack.push(top_item[top_index]);
+				cur_indices.push(1);
+				top_item = cur_stack[cur_stack.length - 1];
+		    top_index = cur_indices[cur_indices.length - 1];
+			}
+			if(this.openFrameList[top_item[0]])
+			{
+				row = this.tbody.append("tr");
+				row.append("td").text((i+1)).style("color", "grey");
+				item = row.append("td").attr("title", this.myViz.frame_lookup[top_item[0]]).style("border", "1px solid black").attr("rowspan", 1 + top_item[top_item.length - 1] - top_item[1] - getClosedLength(top_item, this.openFrameList));
+				item.append("div").style("width", "20px").style("text-align", "center");
+				item.on("mouseover", function()
+				{
+					d3.select(this).transition().style("background-color", "rgba(0,0,0,.05)").select("div").text("-");
+				});
+				item.on("mouseout", function()
+				{
+					d3.select(this).transition().style("background-color", "rgba(0,0,0,0)").select("div").text("");
+				});
+				frame_id = top_item[0];
+				item.data([frame_id]);
+				item.on("click", function()
+				{
+					theGraph.openFrameList[this.__data__] = false;
+					theGraph.redraw();
+				});
+				row.append("td").attr("colspan", 1 + this.myViz.frame_depth - cur_stack.length);
+				row.append("td").text(this.myViz.curTrace[i].line);
+				row.append("td").text(String(this.dataList[i]));
+				i = i + 1;
+				cur_indices[cur_indices.length - 1] = cur_indices[cur_indices.length - 1] + 1;
+			}
+			else
+			{
+				i = top_item[top_item.length - 1];
+				row = this.tbody.append("tr");
+				row.append("td").text((i+1)).style("color", "grey");
+				item = row.append("td").attr("title", this.myViz.frame_lookup[top_item[0]]).style("border", "1px dotted black")
+				item.append("div").style("width", "20px").style("text-align", "center");
+				item.on("mouseover", function()
+				{
+					d3.select(this).transition().style("background-color", "rgba(0,0,0,.05)").select("div").text("+");
+				});
+				item.on("mouseout", function()
+				{
+					d3.select(this).transition().style("background-color", "rgba(0,0,0,0)").select("div").text("");
+				});
+				frame_id = top_item[0];
+				item.data([frame_id]);
+				item.on("click", function()
+				{
+					theGraph.openFrameList[this.__data__] = true;
+					theGraph.redraw();
+				});
+				row.append("td").attr("colspan", 1 + this.myViz.frame_depth - cur_stack.length);
+				row.append("td").text(this.myViz.curTrace[i].line);
+				row.append("td").text(String(this.dataList[i]));
+				i = i + 1;
+				cur_stack.pop();
+				cur_indices.pop();
+				cur_indices[cur_indices.length - 1] = cur_indices[cur_indices.length - 1] + 1;
+			}
+		}
+		else
+		{
+			row = this.tbody.append("tr");
+			row.append("td").text((i+1)).style("color", "grey");
+			row.append("td").attr("colspan", 1 + this.myViz.frame_depth - cur_stack.length);
+			row.append("td").text(this.myViz.curTrace[i].line);
+			row.append("td").text(String(this.dataList[i]));
+			i = i + 1;
+		}
+	}
+	first_found = false;
+	this.tbody.selectAll("tr").style("font-weight", function()
+	{
+		if(!first_found && parseInt(d3.select(this).select("td").text()) > theGraph.myViz.curInstr)
+		{
+			first_found = true;
+			return "bold";
+		}
+		return "normal";
+	}).each(function()
+	{
+		d3.select(this.children[this.children.length - 1]).on("mouseover", function()
+		{
+			d3.select(this).style("background-color", "yellow");
+		}).on("mouseout", function()
+		{
+			d3.select(this).style("background-color", "white");
+		}).on("click", function()
+		{
+			i = parseInt(d3.select(this.parentNode.children[0]).text()) - 1;
+			theGraph.myViz.curInstr = i;
+			theGraph.myViz.updateOutput();
+		});
+	});
 }
 
 
