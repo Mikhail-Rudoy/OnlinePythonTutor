@@ -405,9 +405,9 @@ ExecutionVisualizer.prototype.render = function() {
                       codeVizHTML + '</td></tr></table>');
   }
   else {
-    this.domRoot.html(vizHeaderHTML + '<table border="0" class="visualizer"><tr><td class="vizLayoutTd" id="vizLayoutTdFirst">' +
+    this.domRoot.html(vizHeaderHTML + '<table border="0" class="visualizer"><tr><td class="vizLayoutTd" id="vizLayoutTdZeroth"><div id="graph_div" style="border-left:1px solid black;border-right:1px solid black;overflow:auto;height:600px;width:300px;"></div></td><td class="vizLayoutTd" id="vizLayoutTdFirst">' +
                       codeDisplayHTML + '</td><td class="vizLayoutTd" id="vizLayoutTdSecond">' +
-                      codeVizHTML + '</td><td class="vizLayoutTd" id="vizLayoutTdThird"><div id="graph_div" style="border-left:1px solid black;overflow:auto;height:600px;min-width:250px;"></div></td></tr></table>');
+                      codeVizHTML + '</td></tr></table>');
   }
 
   if (this.showOnlyOutputs) {
@@ -649,7 +649,7 @@ ExecutionVisualizer.prototype.render = function() {
   		DataList[i] = undefined;
   	}
   }
-	new Graph(document.getElementById("graph_div"), DataList, "x", this);
+  makeGraph(document.getElementById("graph_div"), 0, "x", this);
 
 
   this.precomputeCurTraceLayouts();
@@ -3075,7 +3075,7 @@ function Graph(container, dataList, varName, myViz, openFrameList)
 	$(this.root).append("<table style='border:0px solid black;width:100%'></table>");
 	this.table = d3.select(this.root.children[this.root.children.length - 1]);
 	tbody = this.table.append("tbody");
-	tbody.append("tr").append("th").text(this.heading).attr("colspan", this.myViz.frame_depth + 3);
+	tbody.append("tr").append("th").text(this.heading).attr("colspan", this.myViz.frame_depth + 4);
 	row = tbody.append("tr");
 	row.append("th").text("step\t");
 	row.append("th").attr("colspan", this.myViz.frame_depth + 1);
@@ -3086,6 +3086,119 @@ function Graph(container, dataList, varName, myViz, openFrameList)
 	this.redraw();
 }
 
+function makeGraph(container, frameid, varname, myViz, openFrameList)
+{
+	find_frame = function(id_to_find, curInstr)
+	{
+		for(j = 0; j < myViz.curTrace[curInstr].stack_to_render.length; j++)
+		{
+			if(myViz.curTrace[curInstr].stack_to_render[j].frame_id == id_to_find)
+			{
+				return myViz.curTrace[curInstr].stack_to_render[j];
+			}
+		}
+		return null;
+	};
+	dataList = new Array(myViz.curTrace.length);
+	for(i = 0; i < dataList.length; i++)
+	{
+		if(frameid == 0)
+		{
+			d = myViz.curTrace[i].globals[varname];
+		}
+		else
+		{
+			frame = find_frame(frameid);
+			d = frame.encoded_locals[varname];
+			for(k = 0; k < frame.parent_frame_id_list.length; k++)
+			{
+				if(d != undefined)
+				{
+					break;
+				}
+				parent_frame = find_frame(frame.parent_frame_id_list[k]);
+				d = parent_frame.encoded_locals[varname];
+			}
+		}
+		if(d === null)
+		{
+			d = "None";
+		}
+		else if(Object.prototype.toString.call(d) == '[object String]')
+		{
+   		d = '"' + d + '"';
+		}
+		else if(Object.prototype.toString.call(d) == '[object Boolean]')
+		{
+			d = d ? "True" : "False";
+		}
+		
+		if(Object.prototype.toString.call(d) == '[object Array]')
+		{
+   		d = myViz.curTrace[i].heap[d[1]];
+   		if(d[0] == "HEAP_PRIMITIVE")
+   		{
+   			d = d[2];
+   			if(d === null)
+				{
+					d = "None";
+				}
+				else if(Object.prototype.toString.call(d) == '[object String]')
+				{
+   				d = '"' + d + '"';
+				}
+				else if(Object.prototype.toString.call(d) == '[object Boolean]')
+				{
+					d = d ? "True" : "False";
+				}
+   		}
+   		if(d[0] == "LIST")
+   		{
+   			d = "<List of length " + (d.length - 1) + ">";
+   		}
+   		if(d[0] == "TUPLE")
+   		{
+   			d = "<Tuple of length " + (d.length - 1) + ">";
+   		}
+   		if(d[0] == "SET")
+   		{
+   			d = "<Set of size " + (d.length - 1) + ">";
+   		}
+   		if(d[0] == "DICT")
+   		{
+   			d = "<Dictionary with " + (d.length - 1) + " key-value pairs>";
+   		}
+   		if(d[0] == "INSTANCE")
+   		{
+   			d = "<Instance of class " + (d[1]) + ">";
+   		}
+   		if(d[0] == "INSTANCE_PPRINT")
+   		{
+   			d = "<Instance of class " + (d[1]) + ">: " + d[2];
+   		}
+   		if(d[0] == "CLASS")
+   		{
+   			d = "<Class " + (d[1]) + ">";
+   		}
+   		if(d[0] == "FUNCTION")
+   		{
+   			d = "<Function  " + (d[1]) + ">";
+   		}
+   		if(d[0] == "module")
+   		{
+   			d = "<Module " + (d[1]) + ">";
+   		}
+   		if(d[0] == "OTHER")
+   		{
+   			d = "<" + (d[1]) + ">: " + d[2];
+   		}
+		}
+		
+		dataList[i] = d;
+	}
+	graphTitle = "variable " + varname + " in " + (frameid == 0 ? "" : "function ") + myViz.frame_lookup[frameid];
+	return new Graph(container, dataList, graphTitle, myViz, openFrameList);
+}
 getClosedLength = function(tree, openFrameList)
 {
 	if(openFrameList[tree[0]])
