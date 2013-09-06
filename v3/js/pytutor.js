@@ -257,6 +257,7 @@ function ExecutionVisualizer(domRootID, dat, params) {
 
 	this.frame_tree = [0, 0];
   this.frame_lookup = [this.curTrace[0].func_name];
+  this.frame_startstop_lookup = []
   cur_stack = [this.frame_tree];
   this.frame_depth = 0;
   for(var i = 0; i < this.curTrace.length; i++)
@@ -268,7 +269,8 @@ function ExecutionVisualizer(domRootID, dat, params) {
     		this.frame_depth = cur_stack.length;
     	}
       cur_stack[cur_stack.length - 1].push(i);
-      cur_stack.pop();
+      thing = cur_stack.pop();
+      this.frame_startstop_lookup[thing[0]] = [thing[1], thing[thing.length - 1]];
     }
     else if(this.curTrace[i].event == "instruction_limit_reached")
     {
@@ -279,7 +281,8 @@ function ExecutionVisualizer(domRootID, dat, params) {
    		    this.frame_depth = cur_stack.length;
         }
   	    cur_stack[cur_stack.length - 1].push(this.curTrace.length - 2);
-        cur_stack.pop();
+        thing = cur_stack.pop();
+      	this.frame_startstop_lookup[thing[0]] = [thing[1], thing[thing.length - 1]];
       }
       break;
     }
@@ -405,7 +408,7 @@ ExecutionVisualizer.prototype.render = function() {
                       codeVizHTML + '</td></tr></table>');
   }
   else {
-    this.domRoot.html(vizHeaderHTML + '<table border="0" class="visualizer"><tr><td class="vizLayoutTd" id="vizLayoutTdZeroth"><div id="graph_div" style="border-left:1px solid black;border-right:1px solid black;overflow:auto;height:600px;width:300px;"></div></td><td class="vizLayoutTd" id="vizLayoutTdFirst">' +
+    this.domRoot.html(vizHeaderHTML + '<table border="0" class="visualizer"><tr><td class="vizLayoutTd" id="vizLayoutTdZeroth"><div id="graph_box"><div></div><div><div id="graph_div" style="display:inline-block;border-left:1px solid black;border-right:1px solid black;overflow-y:auto;overflow-x:hidden;height:600px;"></div></div></div></td><td class="vizLayoutTd" id="vizLayoutTdFirst">' +
                       codeDisplayHTML + '</td><td class="vizLayoutTd" id="vizLayoutTdSecond">' +
                       codeVizHTML + '</td></tr></table>');
   }
@@ -635,21 +638,109 @@ ExecutionVisualizer.prototype.render = function() {
     this.curInstr = this.curTrace.length - 1;
   }
 
-	DataList = [];
-  for(i = 0; i < this.curTrace.length; i++)
-  {
-  	if(this.curTrace[i].globals == undefined)
-  	{}
-  	else if(this.curTrace[i].globals["x"] != undefined)
-  	{
-  		DataList[i] = this.curTrace[i].globals["x"];
-  	}
-  	else
- 		{
-  		DataList[i] = undefined;
-  	}
-  }
-  makeGraph(document.getElementById("graph_div"), 0, "x", this);
+	div1 = d3.select(myViz.domRootD3.select("#graph_box").node().children[0]);
+	div2 = d3.select(myViz.domRootD3.select("#graph_box").node().children[1]);
+	div1.style("display", null);
+	div2.style("display", "none");
+	div1.style("width", "300px").style("height", "600px");
+	div1.style("margin", "0px auto 0px auto").style("text-align", "center").html("<table style='height:600px;'><tr><td style='vertical-align:middle'>Please select a variable whose value you wish to trace:<br></td></tr></table>");
+	dropdown1 = div1.select("td").append("select").attr("id", "frame_id_select");
+	dropdown1.append("option").attr("value", "0").text(myViz.frame_lookup[0]);
+	for(k = 1; k < myViz.frame_lookup.length; k++)
+	{
+		dropdown1.append("option").attr("value", String(k)).text(myViz.frame_lookup[k] + " during steps " + String(myViz.frame_startstop_lookup[k][0]) + "-" + String(myViz.frame_startstop_lookup[k][1]));
+	}
+	
+	allvars = [];
+	for(i = 0; i < myViz.frame_lookup.length; i++)
+	{
+		allvars[i] = {}
+	}
+	for(i = 0; i < myViz.curTrace.length; i++)
+	{
+		for(j = 0; j < myViz.curTrace[i].ordered_globals.length; j++)
+		{
+			allvars[0][myViz.curTrace[i].ordered_globals[j]] = true;
+		}
+		for(k = 0; k < myViz.curTrace[i].stack_to_render.length; k++)
+		{
+			for(j = 0; j < myViz.curTrace[i].stack_to_render[k].ordered_varnames.length; j++)
+			{
+				myVar = myViz.curTrace[i].stack_to_render[k].ordered_varnames[j];
+				if(myVar != "__return__")
+				{
+					allvars[myViz.curTrace[i].stack_to_render[k].frame_id][myVar] = true;
+				}
+			}
+		}
+	}
+	ft = myViz.frame_tree;
+	more_stuff = [ft];
+	while(more_stuff.length > 0)
+	{
+		ft = more_stuff.pop();
+		for(i = 2; i < ft.length - 1; i++)
+		{
+			more_stuff.push(ft[i]);
+			for(var key in allvars[ft[0]])
+			{
+				if (allvars[ft[0]].hasOwnProperty(key))
+				{
+    			allvars[ft[i][0]][key] = true;
+    		}
+			}
+		}
+	}
+	resultLists = []
+	for(i = 0; i < allvars.length; i++)
+	{
+		resultLists[i] = [];
+		for(var key in allvars[i])
+		{
+			if (allvars[i].hasOwnProperty(key))
+			{
+    		resultLists[i].push(key);
+    	}
+		}
+		resultLists[i].sort();
+	}
+	for(i = 0; i < resultLists.length; i++)
+	{
+		dropdown2 = div1.select("td").append("select").attr("id", "variable_name_select_" + String(i));
+		for(j = 0; j < resultLists[i].length; j++)
+		{
+			dropdown2.append("option").attr("value", resultLists[i][j]).text(String(resultLists[i][j]));
+		}
+		if(i != 0)
+		{
+			dropdown2.style("display", "none");
+		}
+	}
+	dropdown1.on("change", function()
+	{
+		dropdown2 = myViz.domRootD3.select("#variable_name_select_" + String(dropdown1.node().value));
+		myViz.domRootD3.select("#graph_box").selectAll("select").style("display", "none");
+		dropdown2.style("display", null);
+		d3.select(this).style("display", null);
+	});
+	
+	div1.select("td").append("button").text("trace").on("click", function()
+	{
+		div2.style("display", null);
+		div1.style("display", "none");
+		myViz.graphs = []
+		document.getElementById("graph_div").innerHTML = "";
+		container = myViz.domRootD3.select("#graph_div").node();
+		frameid = dropdown1.node().value;
+		varname = myViz.domRootD3.select("#variable_name_select_" + String(frameid)).node().value;
+		makeGraph(container, frameid, varname, myViz);
+		btn = d3.select(container).insert("div", ":first-child").style("margin", "0px auto 0px auto").style("text-align", "center").append("button");
+		btn.text("back").on("click", function()
+		{
+			div1.style("display", null);
+			div2.style("display", "none");
+		});
+	});
 
 
   this.precomputeCurTraceLayouts();
@@ -3080,7 +3171,7 @@ function Graph(container, dataList, varName, myViz, openFrameList)
 	row.append("th").text("step\t");
 	row.append("th").attr("colspan", this.myViz.frame_depth + 1);
 	row.append("th").text("line\t");
-	row.append("th").text("value").style("width", "100%").attr("align", "left");
+	row.append("th").text("value").style("width", "100%").style("min-width", "180px").attr("align", "left");
 	
 	this.tbody = this.table.append("tbody");
 	this.redraw();
@@ -3102,29 +3193,47 @@ function makeGraph(container, frameid, varname, myViz, openFrameList)
 	dataList = new Array(myViz.curTrace.length);
 	for(i = 0; i < dataList.length; i++)
 	{
+		inframe = true;
 		if(frameid == 0)
 		{
 			d = myViz.curTrace[i].globals[varname];
 		}
 		else
 		{
-			frame = find_frame(frameid);
-			d = frame.encoded_locals[varname];
-			for(k = 0; k < frame.parent_frame_id_list.length; k++)
+			frame = find_frame(frameid, i);
+			if(frame != null)
 			{
-				if(d != undefined)
+				d = frame.encoded_locals[varname];
+				done = false;
+				for(k = 0; k < frame.parent_frame_id_list.length; k++)
 				{
-					break;
+					if(d != undefined)
+					{
+						done = true;
+						break;
+					}
+					parent_frame = find_frame(frame.parent_frame_id_list[k], i);
+					d = parent_frame.encoded_locals[varname];
 				}
-				parent_frame = find_frame(frame.parent_frame_id_list[k]);
-				d = parent_frame.encoded_locals[varname];
+				if(!done && d == undefined)
+				{
+					d = myViz.curTrace[i].globals[varname];
+				}
 			}
+			else
+			{
+				inframe = false;
+			}
+		}
+		if(!inframe)
+		{
+			d = "N/A";
 		}
 		if(d === null)
 		{
 			d = "None";
 		}
-		else if(Object.prototype.toString.call(d) == '[object String]')
+		else if(Object.prototype.toString.call(d) == '[object String]' && inframe)
 		{
    		d = '"' + d + '"';
 		}
